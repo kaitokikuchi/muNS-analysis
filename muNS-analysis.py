@@ -3,12 +3,13 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import sys,re
 argvs = sys.argv #Store arguments, in this case the path of the data files of thefoci ID to be analyzed
-if len(argvs) <2:
-	print('This script needs a cell data file and foci data file')
+if len(argvs) <3:
+	print('This script needs a cell data file, foci data file, and a foci brightness data file')
 	sys.exit
 plt.style.use('ggplot')
 cellfilepath = argvs[1]
 focifilepath = argvs[2]
+brightnessfilepath = argvs[3]
 #Set regex to extract foci ID
 regex = re.compile(r"^[^_]*_[^_]*_(.*)[.]xls$")
 #Store foci ID
@@ -31,7 +32,6 @@ celldf =celldf.reindex(index=celldf.index[::-1])
 celldf = celldf.reset_index(drop=True)
 celldf.Area.plot(label = 'Cell Area').legend(loc='upper right')
 
-
 #Read in foci data
 focidf = pd.read_csv(focifilepath,sep='\t')
 #Remove irrevelant data
@@ -44,6 +44,12 @@ focidf = focidf.drop(399) #the cell ROI data lacks the first slice, so delete it
 focidf =focidf.reindex(index=focidf.index[::-1])
 focidf = focidf.reset_index(drop=True)
 
+#Read in foci brightness data
+brightness = pd.read_csv(brightnessfilepath,sep='\t')
+brightness = brightness.drop('Min',1)
+#brightness data is in chronological order
+brightness = brightness.drop(399)
+
 #CELL CENTER DISPLACEMENT
 cellx = celldf['XM']
 celly = celldf['YM']
@@ -51,7 +57,7 @@ celly = celldf['YM']
 cellfocidisp = ((celldf.XM-focidf.XM)**2+(celldf.YM-focidf.YM)**2)**(1/2)
 #Calculate per-frame displacement of cell center
 celldisp = pd.Series(((cellx[i+1]-cellx[i])**2+(celly[i+1]-celly[i])**2)**(1/2) for i in range (len(cellx)-1))
-#celldisp.plot()
+
 
 
 #Calculate per-frame displacement of muNS foci in polar coordinates
@@ -73,24 +79,6 @@ for x in polardisp:
 focix = focidf['XM']
 fociy = focidf['YM']
 cartdisp = pd.Series(((focix[i+1]-focix[i])**2+(fociy[i+1]-fociy[i])**2)**(1/2) for i in range (len(focix)-1))
-#cartdisp.plot(label = 'Cartesian Displacement').legend(loc='center left', bbox_to_anchor=(1, 0.5))
-
-
-# plt.figure();
-
-# polardisp.plot(label = 'Polar Displacement', alpha = 0.7)
-# cartdisp.plot( label = 'Cartesian Displacement', alpha = 0.7)
-# celldisp.plot(label='Cell Center Displacement', alpha=0.7, color='orange')
-# plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-# celldf.Area.plot(ax = ax2, color = '#E8D66F', label = 'Cell Area',  alpha = 0.7)
-
-
-# dispdf = pd.DataFrame({'Cartesian': cartdisp, 'Polar': polardisp})
-# dispdf.head(3)
-
-# plt.figure();
-# dispdf.hist(bins=[0,4,8,12,16], color='Black', alpha=0.7)
-
 
 #extract division timepoints
 division = celldisp[celldisp > 10].index
@@ -111,61 +99,31 @@ celldf['Foci X'] = focix
 celldf['Foci Y'] = fociy
 celldf['Cartesian_Displacement'] = cartdisp
 celldf['Polar_Displacement'] = polardisp
+celldf['Fluorescence_Intensity'] = brightness['Max']
 celldf['Generation'] = generation
 celldf.to_csv(resultdir+'data_%s.csv'%fociID, sep=',')
 
 
-gendict = {}
-gentimedict = {}
-gencartmeandict={}
-gencartcvdict={}
-genpolarmeandict = {}
-genpolarcvdict = {}
-gengrowthdict = {}
-for n in range(2,len(division)+1):  #omit first and last generation
-    gendict[n] = celldf[celldf.Generation==n]
-    gentimedict[n] = len(gendict[n])
-    gencartmeandict[n]=gendict[n].Cartesian_Displacement.mean()
-    gencartcvdict[n] = gendict[n].Cartesian_Displacement.std()/gendict[n].Cartesian_Displacement.mean()
-    genpolarmeandict[n] = gendict[n].Polar_Displacement.mean()
-    genpolarcvdict[n] = gendict[n].Polar_Displacement.std()/gendict[n].Polar_Displacement.mean()
-    gengrowthdict[n] = (np.log(gendict[n].Area.iloc[-1] /gendict[n].Area.iloc[0]))/gentimedict[n]
+#Set first 10 brightness measurements as chaaracteristic foci brightness
+foci_brightness = brightness.Max.head(10).mean()
 
+#Set Per-Generation DataFrame
+gendf = pd.DataFrame()
 
-gendf=pd.DataFrame()
+gendf['Generation_Time']=celldf.groupby('Generation').size()
+gendf['Elongation_Rate'] =(np.log(celldf.groupby('Generation')["Area"].last() /celldf.groupby('Generation')["Area"].first()))/celldf.groupby('Generation').size()
+gendf['Fluorescence_Intensity'] = foci_brightness
 
-gengrowth = pd.Series(gengrowthdict)
-gentime=pd.Series(gentimedict)
-gencartmean = pd.Series(gencartmeandict)
-gencartcv = pd.Series(gencartcvdict)
-genpolarmean = pd.Series(genpolarmeandict)
-genpolarcv = pd.Series(genpolarcvdict)
+gendf['Mean_Cartesian_Displacement'] = celldf.groupby('Generation')['Cartesian_Displacement'].mean()
+gendf['CV_Cartesian_Displacement'] = celldf.groupby('Generation')['Cartesian_Displacement'].std()/celldf.groupby('Generation')['Cartesian_Displacement'].mean()
 
-gendf['Generation_Time']=gentime
-gendf['Elongation_Rate'] =gengrowth
-gendf['Mean_Cartesian_Displacement'] = gencartmean
-gendf['CV_Cartesian_Displacement'] = gencartcv
-gendf['Mean_Polar_Displacement'] = genpolarmean
-gendf['CV_Polar_Displacement'] = genpolarcv
+gendf['Mean_Polar_Displacement'] = celldf.groupby('Generation')['Polar_Displacement'].mean()
+gendf['CV_Polar_Displacement'] = celldf.groupby('Generation')['Polar_Displacement'].std()/celldf.groupby('Generation')['Polar_Displacement'].mean()
+
 gendf.index.name = 'Generation'
 
+#omit first and last generation
+gendf = gendf.drop(1)
+gendf = gendf.drop(gendf.tail(1).index)
+
 gendf.to_csv(resultdir+'generationdata_%s.csv'%fociID, sep=',')
-
-
-
-# ax = gendf.plot(kind='scatter', x = 'Mean_Cartesian_Displacement', y = 'Elongation_Rate_min-1', alpha=0.7,label = 'Mean Cart Disp',color='Blue')
-# gendf.plot(kind='scatter', x = 'Mean_Polar_Displacement', y = 'Elongation_Rate_min-1',alpha=0.7,label = 'Mean Polar Disp', color='Red', ax=ax)
-# plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-# ax2= gendf.plot(kind='scatter', x = 'CV_Cartesian_Displacement', y = 'Elongation_Rate_min-1', alpha=0.7,label = 'CV of Cart Disp', color='Orange')
-# gendf.plot(kind='scatter', x = 'CV_Polar_Displacement', y = 'Elongation_Rate_min-1', alpha=0.7,label = 'CV of Polar Disp', color='Black',ax=ax2)
-# plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-
-# ax3 = gendf.plot(kind='scatter', x = 'Mean_Cartesian_Displacement', y = 'Generation_Time', alpha=0.7,label = 'Mean Cart Disp',color='Blue')
-# gendf.plot(kind='scatter', x = 'Mean_Polar_Displacement', y = 'Generation_Time',alpha=0.7,label = 'Mean Polar Disp', color='Red', ax=ax3)
-# plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-
-# ax4= gendf.plot(kind='scatter', x = 'CV_Cartesian_Displacement', y = 'Generation_Time', alpha=0.7,label = 'CV of Cart Disp', color='Orange')
-# gendf.plot(kind='scatter', x = 'CV_Polar_Displacement', y = 'Generation_Time', alpha=0.7,label = 'CV of Polar Disp', color='Black',ax=ax4)
-# plt.legend(loc='center left', bbox_to_anchor=(1, 0.5))
-
-
