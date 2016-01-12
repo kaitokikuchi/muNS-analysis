@@ -16,8 +16,8 @@ brightnessfilepath = argvs[3]
 regex = re.compile(r"^[^_]*_[^_]*_(.*)[.]xls$")
 #Store foci ID
 fociID = re.sub(regex, r"\1",cellfilepath)
-#1pixel=0.0225µm
-pix = 0.0225
+#1pixel=0.0435µm
+pix = 0.0435
 
 resultdir = '/Volumes/Kikuchi-SSD/150701F3-muNS-Per2/F3-muNS-30deg-M9glycas-0.2mMIPTG1h-bin2-TxRed300-GFP500-1minint_1/Python_Processed/'
 
@@ -34,7 +34,7 @@ celldf = celldf.drop('Minor',1)
 #Reverse order here so dataframe matches chronological order
 celldf = celldf.reindex(index=celldf.index[::-1])
 celldf = celldf.reset_index(drop=True)
-celldf.Area = celldf.Area*pix**2
+celldf.Area = celldf.Area*(pix**2)
 celldf.XM = celldf.XM*pix
 celldf.YM = celldf.YM*pix
 #celldf.Area.plot(label = 'Cell Area').legend(loc='upper right')
@@ -63,12 +63,14 @@ brightness = brightness.drop(399)
 #CELL CENTER DISPLACEMENT
 cellx = celldf['XM']
 celly = celldf['YM']
+focix = focidf['XM']
+fociy = focidf['YM']
 #Calcluate distance between cell center and muNS focus
 cellfocidisp = ((celldf.XM-focidf.XM)**2+(celldf.YM-focidf.YM)**2)**(1/2)
-#Calculate per-frame displacement of cell center
+#Calculate displacement of cell center
 celldisp = pd.Series(((cellx[i+1]-cellx[i])**2+(celly[i+1]-celly[i])**2)**(1/2) for i in range (len(cellx)-1))
-
-
+#Calculate per-frame displacement of foci in Cartesian, corrected by cell center displacement
+cartdisp = pd.Series(((focix[i+1]-focix[i]-cellx[i+1]+cellx[i])**2+(fociy[i+1]-fociy[i]-celly[i+1]+celly[i])**2)**(1/2) for i in range (len(cellx)-1))
 
 #Calculate per-frame displacement of muNS foci in polar coordinates
 #convert cell ROI long axis angle to radians
@@ -82,16 +84,13 @@ polardisp= pd.Series((cellfocidisp[i+1]**2+cellfocidisp[i]**2-2*cellfocidisp[i]*
 #Replace the outliers in Polar displacements (that comes from cell division) with mean
 for x in polardisp:
 	if x>0.2:
-		polardisp[polardisp == x]=polardisp.mean()
-
-
-#calculate cartesian distance
-focix = focidf['XM']
-fociy = focidf['YM']
-cartdisp = pd.Series(((focix[i+1]-focix[i])**2+(fociy[i+1]-fociy[i])**2)**(1/2) for i in range (len(focix)-1))
+		polardisp[polardisp == x] = polardisp.mean()
+for x in cartdisp:
+	if x>0.4:
+		cartdisp[cartdisp == x] = cartdisp.mean()
 
 #extract division timepoints
-division = celldisp[celldisp > 0.18].index
+division = celldisp[celldisp > 0.4].index
 
 #Set generation number for each timepoint
 generation = pd.Series(range(len(polardisp)+1))
