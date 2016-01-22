@@ -90,8 +90,6 @@ for x in division:
         polardisp[x] = polardisp.mean()
         cartdisp[x] = cartdisp.mean()
 
-
-
 #Set generation number for each timepoint
 generation = pd.Series(range(len(polardisp)+1))
 
@@ -103,15 +101,11 @@ for i in range(len(division)+1):
     else:
         generation[division[i-1]+1:division[i]+1]= i+1
 
-
-
-
-
 celldf['Foci X'] = focix
 celldf['Foci Y'] = fociy
 celldf['Cartesian_Displacement'] = cartdisp
 celldf['Polar_Displacement'] = polardisp
-celldf['Fluorescence_Intensity'] = brightness['Max']
+celldf['Fluorescence_Intensity'] = brightness.Max.head(10).mean()
 celldf['Generation'] = generation
 celldf['rcostheta'] = cellfocidisp*np.cos(radfoci)
 celldf.to_csv(resultdir+'GeneralData/data_%s.csv'%fociID, sep=',')
@@ -122,10 +116,16 @@ for x in range(1,len(division)+2):
     gendict[x]['t'] = np.arange(len(gendict[x]))
 radigidict = {}
 genradigidict = {}
+linradigydict = {}
 for i in gendict:
-    radigidict[i] = pd.Series((x-gendict[i].rcostheta.mean())**2 for x in gendict[i].rcostheta)
-    genradigidict[i] = np.sqrt(radigidict[i].mean())
+	radigidict[i] = pd.Series((x-gendict[i].rcostheta.mean())**2 for x in gendict[i].rcostheta)
+	genradigidict[i] = np.sqrt(radigidict[i].mean())
+	linradigydict[i] = radigidict[i].sum()
+
 genradigi = pd.DataFrame.from_dict(genradigidict, orient="index")
+linradigydf = pd.DataFrame.from_dict(linradigydict, orient='index')
+linradigydf = linradigydf.drop(1)
+linradigydf = linradigydf.drop(linradigydf.tail(1).index)
 
 
 #Set first 10 measurements from max intensity as characteristic foci brightness
@@ -145,6 +145,8 @@ gendf['Total_Cartesian_Displacement'] = celldf.groupby('Generation')['Cartesian_
 gendf['Mean_Polar_Displacement'] = celldf.groupby('Generation')['Polar_Displacement'].mean()
 gendf['Max_Polar_Displacement']= celldf.groupby('Generation')['Polar_Displacement'].max()
 gendf['CV_Polar_Displacement'] = celldf.groupby('Generation')['Polar_Displacement'].std()/celldf.groupby('Generation')['Polar_Displacement'].mean()
+largedf = celldf[celldf['Polar_Displacement'] > 0.4]
+gendf['Polar_Displacements_Over_04'] = largedf.groupby('Generation')['Polar_Displacement'].count()
 gendf['Foci_ID'] = fociID
 
 gendf['Radius_Gyration'] = genradigi
@@ -161,18 +163,25 @@ gendf2.to_csv(resultdir+'MiddleGeneration/middlegenerationdata_%s.csv'%fociID, s
 lineage = pd.DataFrame()
 #create dataframe omitting 1st and last generations
 lindf = celldf[(celldf.Generation>1)&(celldf.Generation<(len(division)+1))]
+largelindf = lindf[lindf['Polar_Displacement'] > 0.4]
 
 lineage['ID'] = pd.Series(fociID)
+lineage['Divisions'] = len(division)
 lineage['Lineage_Length'] =gendf2.Generation_Time.sum()
 lineage['Fluorescence_Intensity'] =foci_brightness
 lineage['Lineage_Elongation_Rate'] = (np.log(lindf.groupby('Generation')["Area"].last() /lindf.groupby('Generation')["Area"].first())).sum()/lineage.Lineage_Length
+lineage['Lineage_Fitness'] = (1/400)*len(division)*np.log(2)
 lineage['Mean_Cartesian_Displacement'] = lindf['Cartesian_Displacement'].mean()
 lineage['CV_Cartesian_Displacement'] = lindf['Cartesian_Displacement'].std(ddof=1)/lindf['Cartesian_Displacement'].mean()
 lineage['Max_Cartesian_Displacement'] = lindf['Cartesian_Displacement'].max()
 lineage['Mean_Polar_Displacement'] = lindf['Polar_Displacement'].mean()
 lineage['CV_Polar_Displacement'] = lindf['Polar_Displacement'].std(ddof=1)/lindf['Polar_Displacement'].mean()
+lineage['SEM_Polar_Displacement']= lindf['Polar_Displacement'].std(ddof=1)/np.sqrt(len(lindf['Polar_Displacement']))
 lineage['Max_Polar_Displacement']= lindf['Polar_Displacement'].max()
+lineage['Polar_Displacements_Over_04'] = largelindf['Polar_Displacement'].count()
 lineage['Mean_Radius_Gyration'] = genradigi.mean()
+lineage['Radius_Gyration'] = np.sqrt(linradigydf.sum()/gendf2.Generation_Time.sum())
+
 lineage.to_csv(resultdir+'LineageData/lineagedata_%s.csv'%fociID, sep=',')
 
 
